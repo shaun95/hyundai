@@ -58,19 +58,32 @@ for n in range(1000):
 #plt.plot(y_p[:, 7])
 #plt.show()
 # %%
-# y = N x K
-# y' = N x M
-s = torch.Tensor(S_data) #(Ls, K, M)
-#s = torch.transpose(s, 0, 2) #(M, K, Ls)
-s = torch.transpose(s, 0, 2).transpose(0,1) # (K, M, Ls)
-ty_p = torch.Tensor(sine_array.transpose(1,0)[np.newaxis,:,:]) #(M, N) # .transpose((1,0))[np.newaxis, :, :]
-print("input : {}, s(weight) : {}".format(ty_p.shape, s.shape))
-# %%
-ty = F.conv1d(ty_p, s, stride=1, padding=127)
-print(ty.shape)
-plt.plot(y_p[:,0])
-plt.plot(ty.numpy()[0, 0, :1000])
-plt.show()
+def Shift(y_buffer, k_idx, value):
+    with torch.no_grad():
+        y_buffer[1:, k_idx] = y_buffer[:-1, k_idx]
+        y_buffer[0, k_idx] = value
+    return y_buffer
+
+#def Shift(y_buffer, k_idx, value):
+#    with torch.no_grad():
+#        y_buffer[:-1, k_idx] = y_buffer[:-1, k_idx]
+#        y_buffer[-1, k_idx] = value
+#    return y_buffer
+
+def Conv_S(signal, device='cpu'):
+    #Process S filter to waveform data which should be (time, 8)
+    with torch.no_grad():
+        time_len = signal.size(0)
+        y_pred = torch.zeros((time_len, 8), requires_grad=False, device=device)
+        S_filter = torch.Tensor(S_data, requires_grad=False, device=device) #(Ls, K, M)
+        Y_buffer = torch.zeros((128, 8), requires_grad=False, device=device)
+        for n in range(time_len):
+            for k in range(8):
+                for m in range(8):
+                    y_pred += torch.dot(Y_buffer[:, k], signal[:, k, m])
+                    Y_buffer = Shift(Y_buffer, k, signal[n, k])
+        
+        return y_pred
 
 # %%
 

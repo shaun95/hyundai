@@ -64,6 +64,12 @@ def Shift(y_buffer, k_idx, value):
         y_buffer[0, k_idx] = value
     return y_buffer
 
+#def Shift(y_buffer, k_idx, value):
+#    with torch.no_grad():
+#        y_buffer[:-1, k_idx] = y_buffer[:-1, k_idx]
+#        y_buffer[-1, k_idx] = value
+#    return y_buffer
+
 def Conv_S(signal, device='cpu'):
     #Process S filter to waveform data which should be (time, 8)
     with torch.no_grad():

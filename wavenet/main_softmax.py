@@ -55,22 +55,22 @@ win_size += receptive_field
 # %%
 print("================> Loading DATA <===================")
 #Load Data Pickle
-with open(params.ACC_DATA, 'rb') as f:
-    acc_pickle = pickle.load(f)
+#with open(params.ACC_DATA, 'rb') as f:
+#    acc_pickle = pickle.load(f)
 
-with open(params.SOUND_DATA, 'rb') as f:
-    sound_pickle = pickle.load(f)
+#with open(params.SOUND_DATA, 'rb') as f:
+#    sound_pickle = pickle.load(f)
 
 #Load Dataset
-acc_data = np.concatenate(list(map(lambda x : utils.slice_window(x, win_size, hop_len), acc_pickle)), axis=0)
-sound_data = np.concatenate(list(map(lambda x : utils.slice_window(x, win_size, hop_len), sound_pickle)), axis=0)
-np.save(os.path.join(params.PATH, "train_acc_win_512_hop_128.npy"), acc_data)
-np.save(os.path.join(params.PATH, "train_sound_win_512_hop_128.npy"), sound_data)
+#acc_data = np.concatenate(list(map(lambda x : utils.slice_window(x, win_size, hop_len), acc_pickle)), axis=0)
+#sound_data = np.concatenate(list(map(lambda x : utils.slice_window(x, win_size, hop_len), sound_pickle)), axis=0)
+#np.save(os.path.join(params.PATH, "train_acc_win_512_hop_128.npy"), acc_data)
+#np.save(os.path.join(params.PATH, "train_sound_win_512_hop_128.npy"), sound_data)
 #acc_data = np.load(params.ACC_NPY)
 #sound_data = np.load(params.SOUND_NPY)
+acc_data = np.load(os.path.join(os.getcwd(), "sample_acc.npy"))
+sound_data = np.load(os.path.join(os.getcwd(), "sample_sound.npy"))
 print("================> DATA Loaded Completed <===================")
-#acc_data = np.load(os.path.join(os.getcwd(), "sample_acc.npy"))
-#sound_data = np.load(os.path.join(os.getcwd(), "sample_sound.npy"))
 # %%
 """PreProcess Data"""
 # 1. Mu encode the data
@@ -107,6 +107,7 @@ for epoch in range(EPOCH):
             #print(weights_before["causal_conv.conv.weight"])
 
             model.train()
+            x, y = next(iter(dataloader))
             x = x.squeeze(1).float().to(device)
             y = y.squeeze(1).float().to(device)
 
