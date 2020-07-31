@@ -5,17 +5,7 @@ import torch
 import torch.nn as nn
 import torchaudio
 # %%
-def encode_mu_law(x, mu = 256):
-    mu = mu - 1
-    fx = np.sign(x)*np.log(1 + mu * abs(x)) / np.log(1+mu)
-    encoded = np.floor((fx + 1) / 2*mu + 0.5).astype(np.long)
-    return encoded
 
-def decode_mu_law(y, mu=256):
-    mu = mu - 1
-    fx = (y-0.5) / mu*2-1
-    x = np.sign(fx)/mu*((1+mu)**np.abs(fx)-1)
-    return x
 
 def data_generation(data, framerate, seq_size=6000, mu=256):
     div = max(data.max(), abs(data.min()))
@@ -44,15 +34,19 @@ class mu_law_encoder(nn.Module):
         x = self.encoder(x)
         return x
 
-def mu_law_decoder(quantization_channels=256, rescale_factor=100):
-    decoder = torchaudio.transforms.MuLawDecoding(quantization_channels=quantization_channels)
-    def _decode(x):
-        x = decoder(x)
-        x = x * rescale_factor
+class mu_law_decoder(nn.Module):
+    def init(self, quantization_channels=256, rescale_factor=100):
+        super().__init__()
+        self.quantization_channels = quantization_channels
+        self.rescale_factor = rescale_factor
+        self.decoder = torchaudio.transforms.MuLawDecoding(quantization_channels=quantization_channels)
+    
+    def forward(self, x):
+        x = self.decoder(x)
+        x = x * self.rescale_factor
         return x
-    return _decode  
 
-#%%
+
 def OneHot_encoder(depth=256):
     def _onehot_encoder(x):
         if isinstance(x, torch.Tensor):
@@ -61,6 +55,19 @@ def OneHot_encoder(depth=256):
             onehot = np.eye(depth)[x]
         return onehot
     return _onehot_encoder
+
+def encode_mu_law(x, mu = 256):
+    mu = mu - 1
+    fx = np.sign(x)*np.log(1 + mu * abs(x)) / np.log(1+mu)
+    encoded = np.floor((fx + 1) / 2*mu + 0.5).astype(np.long)
+    return encoded
+
+def decode_mu_law(y, mu=256):
+    mu = mu - 1
+    fx = (y-0.5) / mu*2-1
+    x = np.sign(fx)/mu*((1+mu)**np.abs(fx)-1)
+    return x
+
 
 #%%
 def slice_window(data, win_size, hop_len):

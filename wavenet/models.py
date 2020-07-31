@@ -107,7 +107,7 @@ class WaveNet(nn.Module):
                                     res_channels=residual_channels, skip_channels=skip_connections)
         #self.last_net = LastNet(128, 256)
         self.last_nets = nn.ModuleList(LastNet(self.skip_connections, 256) for _ in range(self.out_chan))
-    
+
     @staticmethod
     def calc_receptive_fields(layer_size, stack_size):
         layers = [2 ** i for i in range(layer_size)] * stack_size
@@ -131,6 +131,8 @@ class WaveNet(nn.Module):
         :param x: Tensor[batch, timestep, channels]
         :return: Tensor[batch, timestep, channels]
         """
+        if len(x.size()):
+            x = x.squeeze(1)
         output = x.transpose(1,2).contiguous()
         output_size = self.calc_output_size(output)
         
@@ -146,7 +148,7 @@ class WaveNet(nn.Module):
             o = self.last_nets[i](output).unsqueeze(1)
             decisions = torch.cat([decisions, o], axis=1)
 
-        return decisions.transpose(2,3).contiguous()
+        return decisions.transpose(1, 2).contiguous().transpose(2,3).contiguous()
 
 #%%
 class CausalConv1d(nn.Module):
@@ -286,10 +288,10 @@ class LastNet(nn.Module):
         :return:
         """
         super(LastNet, self).__init__()
-        self.conv1 = nn.Conv1d(in_channels, out_channels, 1)
-        self.conv2 = nn.Conv1d(out_channels, out_channels, 1)
+        self.conv1 = nn.Conv1d(in_channels, 512, 1)
+        self.conv2 = nn.Conv1d(512, out_channels, 1)
         self.relu = nn.ReLU()
-        #self.softmax = nn.Softmax(dim=1)
+        #self.softmax = nn.LogSoftmax(dim=1)
 
     def forward(self, x):
         output = self.relu(x)

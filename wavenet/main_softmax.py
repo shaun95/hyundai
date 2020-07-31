@@ -24,7 +24,7 @@ from transition_S import Conv_S
 # %%
 """Settings"""
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   
-os.environ["CUDA_VISIBLE_DEVICES"]="0"
+os.environ["CUDA_VISIBLE_DEVICES"]="1"
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -48,7 +48,7 @@ hop_len = 128
 
 #%%
 """Load Model"""
-model = models.WaveNet_Linear(layer_size=10, stack_size=1).to(device)
+model = models.WaveNet(layer_size=10, stack_size=1).to(device)
 summary(model, (19999, 12))
 receptive_field = model.calc_receptive_fields(layer_size=10, stack_size=1)
 win_size += receptive_field
@@ -66,32 +66,28 @@ print("================> Loading DATA <===================")
 #sound_data = np.concatenate(list(map(lambda x : utils.slice_window(x, win_size, hop_len), sound_pickle)), axis=0)
 #np.save(os.path.join(params.PATH, "train_acc_win_512_hop_128.npy"), acc_data)
 #np.save(os.path.join(params.PATH, "train_sound_win_512_hop_128.npy"), sound_data)
-#acc_data = np.load(params.ACC_NPY)
-#sound_data = np.load(params.SOUND_NPY)
-acc_data = np.load(os.path.join(os.getcwd(), "sample_acc.npy"))
-sound_data = np.load(os.path.join(os.getcwd(), "sample_sound.npy"))
+acc_data = np.load(params.ACC_NPY)
+sound_data = np.load(params.SOUND_NPY)
+#acc_data = np.load(os.path.join(os.getcwd(), "sample_acc.npy"))
+#sound_data = np.load(os.path.join(os.getcwd(), "sample_sound.npy"))
 print("================> DATA Loaded Completed <===================")
 # %%
 """PreProcess Data"""
-# 1. Mu encode the data
-mu_encoder = torchaudio.transforms.MuLawEncoding(quantization_channels=256)
-mu_decoder = torchaudio.transforms.MuLawDecoding(quantization_channels=256)
-
-# %%
 print("================> DATA Preprocessing <===================")
 transform = torchvision.transforms.Compose([
-                                    torchvision.transforms.ToTensor()])
+                                    torchvision.transforms.ToTensor(),
+                                    utils.mu_law_encoder()])
 dataset = utils.Wavenet_Dataset(acc_data, sound_data, receptive_field, transform=transform)
 print("================> DATA Preprocessed <===================")
 
 #%%
-BATCH = 8
-EPOCH = 100
+BATCH = 16
+EPOCH = 30
 dataloader = torch.utils.data.DataLoader(dataset, shuffle=True, batch_size=BATCH)
 #%%
 #Define Loss and optimizer
 optimizer = optim.Adam(model.parameters(), lr=1e-3, betas=(0.5, 0.999))
-loss_fn = nn.MSELoss()
+loss_fn = nn.CrossEntropyLoss()
 
 # %%
 global_step = 0
@@ -99,50 +95,22 @@ min_loss = 9999999.
 epoch_loss = []
 print("================> Train START <===================")
 for epoch in range(EPOCH):
-    epoch_loss = []
-    with tqdm(dataloader, ncols=50, desc="EPOCH : {}".format(epoch + 1)) as _tqdm:
+    model.train()
+    with tqdm(dataloader, ncols=100) as _tqdm:
         for idx, (x, y) in enumerate(_tqdm):
-            # Forward
-            #weights_before = model.state_dict()
-            #print(weights_before["causal_conv.conv.weight"])
-
-            model.train()
-            x, y = next(iter(dataloader))
-            x = x.squeeze(1).float().to(device)
-            y = y.squeeze(1).float().to(device)
-
             optimizer.zero_grad()
+            x = x.float().squeeze(1).to(device)
+            y = y.long().squeeze(1).to(device)
+
             pred = model(x)
 
-            s_filtered = Conv_S(pred, device=device)
-
-            loss = loss_fn(s_filtered, y)
+            loss = loss_fn(pred, y)
             loss.backward()
             optimizer.step()
 
-            #weights_after = model.state_dict()
-            #print(weights_after["causal_conv.conv.weight"])
+            #compute accuracy
+            _pred = torch.argmax(pred, dim=1)
+            corrects = (_pred == y).sum().item()
+            accuracy = corrects / (BATCH * win_size * output_channels)
 
-            global_step += 1
-            _loss = loss.item()
-            writer.add_scalar("Loss/Train", _loss, global_step)
-            epoch_loss.append(_loss)
-            _tqdm.set_postfix(loss='{0:.4f}'.format(_loss))
-            if idx % 10 == 0:
-                for data_idx in range(8):
-                    fig = plt.figure()
-                    wav_plot = fig.add_subplot()
-                    wav_plot.plot(s_filtered.detach().cpu().numpy()[0, :, 0], color="red")
-                    wav_plot.plot(y.detach().cpu().numpy()[0, :, 0], color="blue")
-                    
-                    writer.add_figure("Wavefrom/Channel" + str(data_idx), fig, data_idx)
-    
-    e_loss = np.mean(np.array(epoch_loss))
-    writer.add_scalar("Loss/Epoch_loss", e_loss, epoch + 1)
-    if e_loss <= min_loss:
-        torch.save(model, os.path.join(os.getcwd(), "Wavenet_Linear.h5"))
-
-#%%
-acc_data.shape, sound_data.shape
-
-# %%
+            _tqdm.set_postfix(accuracy = "{:.2f}{}".format(accuracy, corrects))
