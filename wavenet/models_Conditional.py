@@ -4,7 +4,81 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-class Conditional_WaveNet(nn.Module):
+# %%
+class WaveNet_Linear(nn.Module):
+    def __init__(self,
+                layer_size=10,
+                stack_size=1,
+                residual_channels = 64,
+                skip_connections = 128,
+                input_chan = 12,
+                out_chan = 8,
+                bias=False):
+        super(WaveNet_Linear, self).__init__()
+        #Hyper parameters
+        self.input_chan = input_chan
+        self.out_chan = out_chan
+
+        self.residual_channels = residual_channels
+        self.skip_connections = skip_connections
+
+        #Build Model
+        self.receptive_fields = self.calc_receptive_fields(layer_size, stack_size)
+
+        self.dilations = []
+        self.dilated_queues = []
+
+
+        self.causal_conv = CausalConv1d(in_channels=input_chan, out_channels=residual_channels)
+        self.res_stack = ResidualStack(layer_size=layer_size, stack_size=stack_size, 
+                                    res_channels=residual_channels, skip_channels=skip_connections)
+        #self.last_net = LastNet(128, 256)
+        self.last_conv1 = nn.Conv1d(skip_connections, 256, 1)
+        self.last_conv2 = nn.Conv1d(256, 256, 1)
+        self.last_conv3 = nn.Conv1d(256, 8, 1)
+    
+    @staticmethod
+    def calc_receptive_fields(layer_size, stack_size):
+        layers = [2 ** i for i in range(layer_size)] * stack_size
+        num_receptive_fields = np.sum(np.unique(np.array(layers)))
+        
+        return int(num_receptive_fields)
+    
+    def calc_output_size(self, x):
+        output_size = int(x.size(2)) - self.receptive_fields
+        self.check_input_size(x, output_size)
+
+        return output_size
+    
+    def check_input_size(self, x, output_size):
+        if output_size < 1:
+            raise NameError('The data x is too short! The expected output size is {}'.format(output_size))
+    
+    def forward(self, x):
+        """
+        The size of timestep(3rd dimention) has to be bigger than receptive fields
+        :param x: Tensor[batch, timestep, channels]
+        :return: Tensor[batch, timestep, channels]
+        """
+        output = x.transpose(1,2).contiguous()
+        output_size = self.calc_output_size(output)
+        
+        output = self.causal_conv(output)
+        
+        skips = self.res_stack(output, output_size)
+        
+        output = torch.sum(skips, dim=0)
+        #output = self.last_net(output)
+        #decisions = self.last_nets[0](output).unsqueeze(1)
+        
+        decisions = self.last_conv1(output)
+        #decisions = F.relu(decisions)
+        decisions = self.last_conv2(decisions)
+        decisions = self.last_conv3(decisions)
+
+        return decisions.transpose(1,2).contiguous()
+
+class WaveNet(nn.Module):
     def __init__(self,
                 layer_size=10,
                 stack_size=1,
@@ -106,39 +180,37 @@ class DilatedConv1d(nn.Module):
 
 #%%
 class ResidualBlock(nn.Module):
-    def __init__(self, res_channels, skip_channels, cond_channels=12, dilation=1, bias=False):
+    def __init__(self, res_channels, skip_channels, dilation=1, bias=False):
         super(ResidualBlock, self).__init__()
-        self.causal_gate = DilatedConv1d(channels=res_channels, dilation=dilation, bias=bias)
-        self.causal_filter = DilatedConv1d(channels=res_channels, dilation=dilation, bias=bias)
-        
-        self.condition_gate = nn.Conv1d(in_channels=cond_channels, out_channels=res_channels, kernel_size=1, stride=1)
-        self.condition_filter = nn.Conv1d(in_channels=cond_channels, out_channels=res_channels, kernel_size=1, stride=1)
-        
+        self.dilated_conv = DilatedConv1d(channels=res_channels, dilation=dilation, bias=bias)
         self.conv_res = nn.Conv1d(in_channels=res_channels, out_channels=res_channels, padding=0, stride=1, kernel_size=1)
         self.conv_skip = nn.Conv1d(in_channels=res_channels, out_channels=skip_channels, padding=0, stride=1, kernel_size=1)
 
         self.gated_tanh = nn.Tanh()
         self.gated_sig = nn.Sigmoid()
     
-    def forward(self, x, c, skip_size):
+    def forward(self, x, skip_size):
         """
-        :param x: Sound data which is predicted previously
-        :param c: Conditional inputs => acceleration data
+        :param x:
         :param skip_size: The last output size for loss and prediction
         """
-        conv_gate   = self.causal_gate(x) + self.condition_gate(c)
-        conv_filter = self.causal_filter(x) + self.condition_filter(c)
-        
-        out = self.gated_tanh(conv_filter) * self.gated_sig(conv_gate)
-        
-        skip = self.conv_skip(out)
-        skip = skip[:,:,-skip_size:]
+        output = self.dilated_conv(x)
+
+        # forward for gate
+        gated_t = self.gated_tanh(output)
+        gated_s = self.gated_sig(output)
+
+        gated = gated_t * gated_s
         
         # forward for residual conv
         input_cut = x[:,:,-output.size(2):]
-        res = self.conv_res(out) + input_cut
+        res = self.conv_res(gated) + input_cut
 
-        return res, skip
+        #forward for skip conv
+        skip = self.conv_skip(gated)
+        skip = skip[:,:,-skip_size:]
+
+        return output, skip
 
 #%%
 class ResidualStack(nn.Module):
@@ -191,10 +263,9 @@ class ResidualStack(nn.Module):
         
         return dilations
     
-    def forward(self, x, condition, skip_size):
+    def forward(self, x, skip_size):
         """
         :param x:
-        :param condition: Condition data => Acceleration data
         :param skip_size: The last output size for loss and prediction
         :return:
         """
@@ -203,7 +274,7 @@ class ResidualStack(nn.Module):
 
         for res_block in self.res_blocks:
             #output is the next input
-            output, skip = res_block(output, condition, skip_size)
+            output, skip = res_block(output, skip_size)
             skip_connections.append(skip)
         
         return torch.stack(skip_connections)
