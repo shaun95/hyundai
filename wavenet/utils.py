@@ -5,8 +5,6 @@ import torch
 import torch.nn as nn
 import torchaudio
 # %%
-
-
 def data_generation(data, framerate, seq_size=6000, mu=256):
     div = max(data.max(), abs(data.min()))
     data = data/div
@@ -84,13 +82,14 @@ def slice_window(data, win_size, hop_len):
     return np.array(windows)
 
 class Wavenet_Dataset(torch.utils.data.Dataset): 
-  def __init__(self, x, y, receptive_field, transform=None):
+  def __init__(self, x, y, receptive_field, x_transform=None, y_transform=None):
     self.x_data = x
     self.y_data = y
     
     print("x shape : {}  y shape : {}".format(self.x_data.shape, self.y_data.shape))
     
-    self.transform = transform
+    self.x_transform = x_transform
+    self.y_transform = y_transform
     self.receptive_field = receptive_field
 
   def __len__(self): 
@@ -100,8 +99,10 @@ class Wavenet_Dataset(torch.utils.data.Dataset):
     x = self.x_data[idx, :, :]
     y = self.y_data[idx, self.receptive_field:, :]
 
-    if self.transform is not None:
-        x = self.transform(x)
-        y = self.transform(y)
+    if self.x_transform is not None:
+        x = self.x_transform(x)
+    
+    if self.x_transform is not None:
+        y = self.y_transform(y)
     
     return x, y
